@@ -378,27 +378,20 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::InitVAAPIDecoder() {
   return NS_OK;
 }
 
-MediaResult FFmpegVideoDecoder<LIBAV_VER>::InitV4L2Decoder() {
+MediaResult FFmpegVideoDecoder<LIBAV_VER>::InitV4L2Decoder(nsTArray<V4L2CodecMap>& aCodecMap) {
   FFMPEG_LOG("Initialising V4L2-DRM FFmpeg decoder");
 
   StaticMutexAutoLock mon(sMutex);
 
-  // mAcceleratedFormats is already configured so check supported
-  // formats before we do anything.
-  if (mAcceleratedFormats.Length()) {
-    if (!IsFormatAccelerated(mCodecID)) {
-      FFMPEG_LOG("  Format %s is not accelerated",
-                 mLib->avcodec_get_name(mCodecID));
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-    FFMPEG_LOG("  Format %s is accelerated", mLib->avcodec_get_name(mCodecID));
-  }
-
   // Select the appropriate v4l2 codec
   AVCodec* codec = nullptr;
-  if (mCodecID == AV_CODEC_ID_H264) {
-    codec = mLib->avcodec_find_decoder_by_name("h264_v4l2m2m");
+  for (const auto& codecmap : aCodecMap) {
+    if (mCodecID == codecmap.codec_id) {
+      codec = mLib->avcodec_find_decoder_by_name(codecmap.codec_name);
+      break;
+    }
   }
+
   if (!codec) {
     FFMPEG_LOG("No appropriate v4l2 codec found");
     return NS_ERROR_DOM_MEDIA_FATAL_ERR;
@@ -441,7 +434,7 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::InitV4L2Decoder() {
   }
 
   // Set mAcceleratedFormats
-  if (mAcceleratedFormats.IsEmpty()) {
+  if (!mAcceleratedFormats.Contains(mCodecID)) {
     // FFmpeg does not correctly report that the V4L2 wrapper decoders are
     // hardware accelerated, but we know they always are.  If we've gotten
     // this far then we know this codec has a V4L2 wrapper decoder and so is
@@ -588,8 +581,26 @@ RefPtr<MediaDataDecoder::InitPromise> FFmpegVideoDecoder<LIBAV_VER>::Init() {
 #  endif  // MOZ_ENABLE_VAAPI
 
 #  ifdef MOZ_ENABLE_V4L2
-    // VAAPI didn't work or is disabled, so try V4L2 with DRM
-    rv = InitV4L2Decoder();
+    nsTArray<V4L2CodecMap> v4l2m2m_map = {
+        {AV_CODEC_ID_H264, "h264_v4l2m2m"},
+        {AV_CODEC_ID_VP8, "vp8_v4l2m2m"},
+        {AV_CODEC_ID_VP9, "vp9_v4l2m2m"},
+        {AV_CODEC_ID_AV1, "av1_v4l2m2m"},
+    }, mpp_map = {
+        {AV_CODEC_ID_H264, "h264_rkmpp"},
+        {AV_CODEC_ID_VP8, "vp8_rkmpp"},
+        {AV_CODEC_ID_VP9, "vp9_rkmpp"},
+        {AV_CODEC_ID_AV1, "av1_rkmpp"},
+    };
+
+    // VAAPI didn't work or is disabled, so try V4L2M2M
+    rv = InitV4L2Decoder(v4l2m2m_map);
+    if (NS_SUCCEEDED(rv)) {
+      return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
+    }
+
+    // V4L2M2M; didn't work or is disabled, so try mpp
+    rv = InitV4L2Decoder(mpp_map);
     if (NS_SUCCEEDED(rv)) {
       return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
     }

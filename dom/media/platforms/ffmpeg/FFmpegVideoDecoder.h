@@ -21,6 +21,13 @@
 #  include "FFmpegVideoFramePool.h"
 #endif
 
+#  ifdef MOZ_ENABLE_V4L2
+struct V4L2CodecMap {
+  AVCodecID codec_id;
+  char codec_name[32];
+};
+# endif
+
 struct _VADRMPRIMESurfaceDescriptor;
 typedef struct _VADRMPRIMESurfaceDescriptor VADRMPRIMESurfaceDescriptor;
 
@@ -125,7 +132,7 @@ class FFmpegVideoDecoder<LIBAV_VER>
 #ifdef MOZ_USE_HWDECODE
   void InitHWDecodingPrefs();
   MediaResult InitVAAPIDecoder();
-  MediaResult InitV4L2Decoder();
+  MediaResult InitV4L2Decoder(nsTArray<V4L2CodecMap>& aCodecMap);
   bool CreateVAAPIDeviceContext();
   void InitHWCodecContext(bool aUsingV4L2);
   AVCodec* FindVAAPICodec();
