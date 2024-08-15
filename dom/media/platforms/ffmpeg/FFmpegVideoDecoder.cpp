@@ -1036,17 +1036,33 @@ bool FFmpegVideoDecoder<LIBAV_VER>::DecodeStats::IsDecodingSlow() const {
 
 void FFmpegVideoDecoder<LIBAV_VER>::DecodeStats::UpdateDecodeTimes(
     const AVFrame* aFrame) {
+  if (Duration(aFrame)) {
+    // Get the frame duration from decoder (AVFrame Optional)
+    mDuration = Duration(aFrame);  
+  } else if (GetFramePts(aFrame) && mPrevPts) {
+    // Estimate the duration from pts with 1 frame delay
+    mDuration = GetFramePts(aFrame) - mPrevPts;
+    mPrevPts = GetFramePts(aFrame);
+  } else {
+    // Duration is not available, wait forever (-1)
+    mDuration = 100;
+    // when seek, prevpts is set to 0, and pts diff calc is restarted
+    mPrevPts = GetFramePts(aFrame);
+    return;
+  }
+
+  mDecodedFrames++;
+
   TimeStamp now = TimeStamp::Now();
   float decodeTime = (now - mDecodeStart).ToMilliseconds();
   mDecodeStart = now;
 
-  const float frameDuration = Duration(aFrame) / 1000.0f;
+  const float frameDuration = mDuration / 1000.0f;
   if (frameDuration <= 0.0f) {
     FFMPEGV_LOG("Incorrect frame duration, skipping decode stats.");
     return;
   }
 
-  mDecodedFrames++;
   mAverageFrameDuration =
       (mAverageFrameDuration * (mDecodedFrames - 1) + frameDuration) /
       mDecodedFrames;
@@ -1056,9 +1072,9 @@ void FFmpegVideoDecoder<LIBAV_VER>::DecodeStats::UpdateDecodeTimes(
 
   FFMPEGV_LOG(
       "Frame decode takes %.2f ms average decode time %.2f ms frame duration "
-      "%.2f average frame duration %.2f decoded %d frames\n",
+      "%.2f average frame duration %.2f decoded %d frames, %d slow decode\n",
       decodeTime, mAverageFrameDecodeTime, frameDuration, mAverageFrameDuration,
-      mDecodedFrames);
+      mDecodedFrames, mDecodedFramesLate);
 
   // Frame duration and frame decode times may vary and may not
   // neccessarily lead to video playback failure.
@@ -1217,10 +1233,10 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::DoDecode(
       }
       if (mUsingV4L2) {
         rv = CreateImageV4L2(mFrame->pkt_pos, GetFramePts(mFrame),
-                             Duration(mFrame), aResults);
+                             mDecodeStats.mDuration, aResults);
       } else {
         rv = CreateImageVAAPI(mFrame->pkt_pos, GetFramePts(mFrame),
-                              Duration(mFrame), aResults);
+                              mDecodeStats.mDuration, aResults);
       }
 
       // If VA-API/V4L2 playback failed, just quit. Decoder is going to be
@@ -1241,7 +1257,7 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::DoDecode(
     } else
 #  endif
     {
-      rv = CreateImage(mFrame->pkt_pos, GetFramePts(mFrame), Duration(mFrame),
+      rv = CreateImage(mFrame->pkt_pos, GetFramePts(mFrame), mDecodeStats.mDuration,
                        aResults);
     }
     if (NS_FAILED(rv)) {
@@ -1769,6 +1785,9 @@ FFmpegVideoDecoder<LIBAV_VER>::ProcessFlush() {
   mDurationMap.Clear();
 #endif
   mPerformanceRecorder.Record(std::numeric_limits<int64_t>::max());
+#if LIBAVCODEC_VERSION_MAJOR > 58
+  mDecodeStats.mPrevPts = 0;
+#endif
   return FFmpegDataDecoder::ProcessFlush();
 }
 
