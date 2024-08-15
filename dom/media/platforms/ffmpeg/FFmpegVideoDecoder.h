@@ -27,6 +27,13 @@
 #  define AVPixelFormat PixelFormat
 #endif
 
+#  ifdef MOZ_ENABLE_V4L2
+struct V4L2CodecMap {
+  AVCodecID codec_id;
+  char codec_name[32];
+};
+# endif
+
 struct _VADRMPRIMESurfaceDescriptor;
 typedef struct _VADRMPRIMESurfaceDescriptor VADRMPRIMESurfaceDescriptor;
 
@@ -176,7 +183,7 @@ class FFmpegVideoDecoder<LIBAV_VER>
   bool UploadSWDecodeToDMABuf() const;
   bool IsLinuxHDR() const;
   MediaResult InitVAAPIDecoder();
-  MediaResult InitV4L2Decoder();
+  MediaResult InitV4L2Decoder(nsTArray<V4L2CodecMap>& aCodecMap);
   bool CreateVAAPIDeviceContext();
   AVCodec* FindVAAPICodec();
   bool GetVAAPISurfaceDescriptor(VADRMPRIMESurfaceDescriptor* aVaDesc);
