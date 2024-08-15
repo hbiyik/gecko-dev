@@ -31,6 +31,9 @@ if CONFIG["MOZ_ENABLE_VAAPI"]:
 if CONFIG["MOZ_ENABLE_V4L2"]:
     DIRS += ["v4l2test"]
 
+if CONFIG["MOZ_ENABLE_V4L2"]:
+    DIRS += ["mpptest"]
+
 EXPORTS += [
     "MozContainer.h",
     "MozContainerSurfaceLock.h",
