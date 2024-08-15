@@ -167,13 +167,15 @@ class FFmpegVideoDecoder<LIBAV_VER>
     void DecodeStart();
     void UpdateDecodeTimes(const AVFrame* aFrame);
     bool IsDecodingSlow() const;
+    int64_t mDuration = 0;
+    int64_t mPrevPts = 0;
 
    private:
     uint32_t mDecodedFrames = 0;
 
     float mAverageFrameDecodeTime = 0;
     float mAverageFrameDuration = 0;
-
+    
     // Number of delayed frames until we consider decoding as slow.
     const uint32_t mMaxLateDecodedFrames = 15;
     // How many frames is decoded behind its pts time, i.e. video decode lags.
