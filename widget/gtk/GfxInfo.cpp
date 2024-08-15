@@ -39,12 +39,12 @@
 
 // How long we wait for data from glxtest/vaapi test process in milliseconds.
 #define GFX_TEST_TIMEOUT 4000
-#define VAAPI_TEST_TIMEOUT 2000
-#define V4L2_TEST_TIMEOUT 2000
+#define HWDEC_TEST_TIMEOUT 2000
 
 #define GLX_PROBE_BINARY u"glxtest"_ns
 #define VAAPI_PROBE_BINARY u"vaapitest"_ns
 #define V4L2_PROBE_BINARY u"v4l2test"_ns
+#define MPP_PROBE_BINARY u"mpptest"_ns
 
 namespace mozilla::widget {
 
@@ -592,7 +592,7 @@ int GfxInfo::FireTestProcess(const nsAString& aBinaryFile, int* aOutPipe,
 
   argv[0] = strdup(exePath->NativePath().get());
   for (int i = 0; i < MAX_ARGS; i++) {
-    if (aStringArgs[i]) {
+    if (aStringArgs && aStringArgs[i]) {
       argv[i + 1] = strdup(aStringArgs[i]);
     } else {
       argv[i + 1] = nullptr;
@@ -646,69 +646,63 @@ bool GfxInfo::FireGLXTestProcess() {
   return true;
 }
 
-void GfxInfo::GetDataVAAPI() {
-  if (mIsVAAPISupported.isSome()) {
-    return;
-  }
-  mIsVAAPISupported = Some(false);
-
+void GfxInfo::HwDecTest(const nsAString& aBinary, const char** aArgs) {
 #ifdef MOZ_ENABLE_VAAPI
-  char* vaapiData = nullptr;
-  auto free = mozilla::MakeScopeExit([&] { g_free((void*)vaapiData); });
+  char* testData = nullptr;
+  auto free = mozilla::MakeScopeExit([&] { g_free((void*)testData); });
 
-  int vaapiPipe = -1;
-  int vaapiPID = 0;
-  const char* args[] = {"-d", mDrmRenderDevice.get(), nullptr};
-  vaapiPID = FireTestProcess(VAAPI_PROBE_BINARY, &vaapiPipe, args);
-  if (!vaapiPID) {
+  int testPipe = -1;
+  int testPID = 0;
+  testPID = FireTestProcess(aBinary, &testPipe, aArgs);
+  if (!testPID) {
     return;
   }
 
-  if (!ManageChildProcess("vaapitest", &vaapiPID, &vaapiPipe,
-                          VAAPI_TEST_TIMEOUT, &vaapiData)) {
-    gfxCriticalNote << "vaapitest: ManageChildProcess failed\n";
+  if (!ManageChildProcess((const char *)aBinary.Data(), &testPID, &testPipe,
+                        HWDEC_TEST_TIMEOUT, &testData)) {
+    gfxCriticalNote << aBinary.Data() << ": ManageChildProcess failed\n";;
     return;
   }
 
-  char* bufptr = vaapiData;
+  char* bufptr = testData;
   char* line;
   while ((line = NS_strtok("\n", &bufptr))) {
-    if (!strcmp(line, "VAAPI_SUPPORTED")) {
+    if (!strcmp(line, "SUPPORTED")) {
       line = NS_strtok("\n", &bufptr);
       if (!line) {
-        gfxCriticalNote << "vaapitest: Failed to get VAAPI support\n";
+        gfxCriticalNote << aBinary.Data() << ": Failed to get VAAPI support\n";
         return;
       }
-      mIsVAAPISupported = Some(!strcmp(line, "TRUE"));
-    } else if (!strcmp(line, "VAAPI_HWCODECS")) {
+      mIsHwDecSupported = Some(!strcmp(line, "TRUE"));
+    } else if (!strcmp(line, "HWCODECS")) {
       line = NS_strtok("\n", &bufptr);
       if (!line) {
-        gfxCriticalNote << "vaapitest: Failed to get VAAPI codecs\n";
+        gfxCriticalNote << aBinary.Data() << ": Failed to get codecs\n";
         return;
       }
 
-      std::istringstream(line) >> mVAAPISupportedCodecs;
-      if (mVAAPISupportedCodecs & CODEC_HW_H264) {
+      std::istringstream(line) >> mHwDecSupportedCodecs;
+      if (mHwDecSupportedCodecs & CODEC_HW_H264) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::H264HardwareDecode);
       }
-      if (mVAAPISupportedCodecs & CODEC_HW_VP8) {
+      if (mHwDecSupportedCodecs & CODEC_HW_VP8) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::VP8HardwareDecode);
       }
-      if (mVAAPISupportedCodecs & CODEC_HW_VP9) {
+      if (mHwDecSupportedCodecs & CODEC_HW_VP9) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::VP9HardwareDecode);
       }
-      if (mVAAPISupportedCodecs & CODEC_HW_AV1) {
+      if (mHwDecSupportedCodecs & CODEC_HW_AV1) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::AV1HardwareDecode);
       }
     } else if (!strcmp(line, "WARNING") || !strcmp(line, "ERROR")) {
-      gfxCriticalNote << "vaapitest: " << line;
+      gfxCriticalNote << aBinary.Data() << ": " << line;
       line = NS_strtok("\n", &bufptr);
       if (line) {
-        gfxCriticalNote << "vaapitest: " << line << "\n";
+        gfxCriticalNote << aBinary.Data() << line << "\n";
       }
       return;
     }
@@ -716,13 +710,16 @@ void GfxInfo::GetDataVAAPI() {
 #endif
 }
 
-// Probe all V4L2 devices and check their capabilities
-void GfxInfo::GetDataV4L2() {
-  if (mIsV4L2Supported.isSome()) {
-    // We have already probed v4l2 support, no need to do it again.
+void GfxInfo::HwDecGet() {
+  if (mIsHwDecSupported.isSome()) {
     return;
   }
-  mIsV4L2Supported = Some(false);
+  mIsHwDecSupported = Some(false);
+
+#ifdef MOZ_ENABLE_VAAPI
+  const char* args[] = {"-d", mDrmRenderDevice.get(), nullptr};
+  HwDecTest(VAAPI_PROBE_BINARY, args);
+#endif  // MOZ_ENABLE_VAAPI
 
 #ifdef MOZ_ENABLE_V4L2
   DIR* dir = opendir("/dev");
@@ -735,100 +732,14 @@ void GfxInfo::GetDataV4L2() {
     if (!strncmp(dir_entry->d_name, "video", 5)) {
       nsCString path = "/dev/"_ns;
       path += nsDependentCString(dir_entry->d_name);
-      V4L2ProbeDevice(path);
+      const char* args[] = {"-d", path.get(), nullptr};
+      HwDecTest(V4L2_PROBE_BINARY, args);
+    } else if (!strncmp(dir_entry->d_name, "mpp_service", 11)){
+      HwDecTest(MPP_PROBE_BINARY, nullptr);
     }
   }
   closedir(dir);
 #endif  // MOZ_ENABLE_V4L2
-}
-
-// Check the capabilities of a single V4L2 device.  If the device doesn't work
-// or doesn't support any codecs we recognise, then we just ignore it.  If it
-// does support recognised codecs then add these codecs to the supported list
-// and mark V4L2 as supported: We only need a single working device to enable
-// V4L2, when we come to decode FFmpeg will probe all the devices and choose
-// the appropriate one.
-void GfxInfo::V4L2ProbeDevice(nsCString& dev) {
-  char* v4l2Data = nullptr;
-  auto free = mozilla::MakeScopeExit([&] { g_free((void*)v4l2Data); });
-
-  int v4l2Pipe = -1;
-  int v4l2PID = 0;
-  const char* args[] = {"-d", dev.get(), nullptr};
-  v4l2PID = FireTestProcess(V4L2_PROBE_BINARY, &v4l2Pipe, args);
-  if (!v4l2PID) {
-    gfxCriticalNote << "Failed to start v4l2test process\n";
-    return;
-  }
-
-  if (!ManageChildProcess("v4l2test", &v4l2PID, &v4l2Pipe, V4L2_TEST_TIMEOUT,
-                          &v4l2Data)) {
-    gfxCriticalNote << "v4l2test: ManageChildProcess failed\n";
-    return;
-  }
-
-  char* bufptr = v4l2Data;
-  char* line;
-  nsTArray<nsCString> capFormats;
-  nsTArray<nsCString> outFormats;
-  bool supported = false;
-  // Use gfxWarning rather than gfxCriticalNote from here on because the
-  // errors/warnings output by v4l2test are generally just caused by devices
-  // which aren't M2M decoders. Set gfx.logging.level=5 to see these messages.
-
-  while ((line = NS_strtok("\n", &bufptr))) {
-    if (!strcmp(line, "V4L2_SUPPORTED")) {
-      line = NS_strtok("\n", &bufptr);
-      if (!line) {
-        gfxWarning() << "v4l2test: Failed to get V4L2 support\n";
-        return;
-      }
-      supported = !strcmp(line, "TRUE");
-    } else if (!strcmp(line, "V4L2_CAPTURE_FMTS")) {
-      line = NS_strtok("\n", &bufptr);
-      if (!line) {
-        gfxWarning() << "v4l2test: Failed to get V4L2 CAPTURE formats\n";
-        return;
-      }
-      char* capture_fmt;
-      while ((capture_fmt = NS_strtok(" ", &line))) {
-        capFormats.AppendElement(capture_fmt);
-      }
-    } else if (!strcmp(line, "V4L2_OUTPUT_FMTS")) {
-      line = NS_strtok("\n", &bufptr);
-      if (!line) {
-        gfxWarning() << "v4l2test: Failed to get V4L2 OUTPUT formats\n";
-        return;
-      }
-      char* output_fmt;
-      while ((output_fmt = NS_strtok(" ", &line))) {
-        outFormats.AppendElement(output_fmt);
-      }
-    } else if (!strcmp(line, "WARNING") || !strcmp(line, "ERROR")) {
-      line = NS_strtok("\n", &bufptr);
-      if (line) {
-        gfxWarning() << "v4l2test: " << line << "\n";
-      }
-      return;
-    }
-  }
-
-  // If overall SUPPORTED flag is not TRUE then stop now
-  if (!supported) {
-    return;
-  }
-
-  // Currently the V4L2 decode platform only supports YUV420 and NV12
-  if (!capFormats.Contains("YV12") && !capFormats.Contains("NV12")) {
-    return;
-  }
-
-  // Supported codecs
-  if (outFormats.Contains("H264")) {
-    mIsV4L2Supported = Some(true);
-    media::MCSInfo::AddSupport(media::MediaCodecsSupport::H264HardwareDecode);
-    mV4L2SupportedCodecs |= CODEC_HW_H264;
-  }
 }
 
 const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
@@ -1279,8 +1190,7 @@ nsresult GfxInfo::GetFeatureStatusImpl(
     if (aFeature != pair.mFeature) {
       continue;
     }
-    if ((mVAAPISupportedCodecs & pair.mCodec) ||
-        (mV4L2SupportedCodecs & pair.mCodec)) {
+    if (mHwDecSupportedCodecs & pair.mCodec) {
       *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
     } else {
       *aStatus = nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST;
@@ -1303,13 +1213,11 @@ nsresult GfxInfo::GetFeatureStatusImpl(
          StaticPrefs::media_hardware_video_decoding_force_enabled_AtStartup() ||
          StaticPrefs::media_ffmpeg_vaapi_enabled_AtStartup());
     if (probeHWDecode) {
-      GetDataVAAPI();
-      GetDataV4L2();
+      HwDecGet();
     } else {
-      mIsVAAPISupported = Some(false);
-      mIsV4L2Supported = Some(false);
+      mIsHwDecSupported = Some(false);
     }
-    if (!mIsVAAPISupported.value() && !mIsV4L2Supported.value()) {
+    if (!mIsHwDecSupported.value()) {
       *aStatus = nsIGfxInfo::FEATURE_BLOCKED_PLATFORM_TEST;
       aFailureId = "FEATURE_FAILURE_VIDEO_DECODING_TEST_FAILED";
     }

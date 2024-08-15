@@ -192,10 +192,10 @@ static void vaapitest(const char* aRenderDevicePath) {
     }
   }
   if (foundProfile) {
-    record_value("VAAPI_SUPPORTED\nTRUE\n");
-    record_value("VAAPI_HWCODECS\n%d\n", codecs);
+    record_value("SUPPORTED\nTRUE\n");
+    record_value("HWCODECS\n%d\n", codecs);
   } else {
-    record_value("VAAPI_SUPPORTED\nFALSE\n");
+    record_value("SUPPORTED\nFALSE\n");
   }
   log("vaapitest finished\n");
 }
