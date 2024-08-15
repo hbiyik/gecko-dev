@@ -38,31 +38,47 @@
 // Print test results to stdout and logging to stderr
 #define OUTPUT_PIPE 1
 
-// Convert an integer pixfmt to a 4-character string.  str must have a length
-// of at least 5 to include null-termination.
-static void v4l2_pixfmt_to_str(uint32_t pixfmt, char* str) {
-  for (int i = 0; i < 4; i++) {
-    str[i] = (pixfmt >> (i * 8)) & 0xff;
-  }
-  str[4] = 0;
-}
+using HwAccelCodec = enum {
+  CODEC_HW_H264 = 1 << 4,
+  CODEC_HW_VP8 = 1 << 5,
+  CODEC_HW_VP9 = 1 << 6,
+  CODEC_HW_AV1 = 1 << 7,
+};
 
-// Enumerate the buffer formats supported on a V4L2 buffer queue.  aTypeStr
-// is the queue type, i.e. CAPTURE or OUTPUT.
-static void v4l2_enumfmt(int aFd, int aType, const char* aTypeStr) {
+// Enumerate the buffer formats supported on a V4L2 buffer queue.
+static int v4l2_supported_fmts(int aFd, int aType) {
+  int supported = 0;
   struct v4l2_fmtdesc fmt {};
-  char pix_fmt_str[5];
   fmt.type = aType;
-  record_value("V4L2_%s_FMTS\n", aTypeStr);
   for (fmt.index = 0;; fmt.index++) {
     int result = ioctl(aFd, VIDIOC_ENUM_FMT, &fmt);
     if (result < 0) {
+      supported = result;
       break;
     }
-    v4l2_pixfmt_to_str(fmt.pixelformat, pix_fmt_str);
-    record_value(" %s", pix_fmt_str);
+    switch (fmt.pixelformat) {
+      case V4L2_PIX_FMT_H264:
+        supported |= CODEC_HW_H264;
+        break;
+      /*
+      case V4L2_PIX_FMT_VP8:
+        supported |= CODEC_HW_VP8;
+        break;
+      case V4L2_PIX_FMT_VP9:
+        supported |= CODEC_HW_VP9;
+        break;
+      case V4L2_PIX_FMT_AV1:
+      *supported |= CODEC_HW_AV1;
+         break;
+      */
+      case V4L2_PIX_FMT_NV12:
+        supported = 1;
+        break;
+      case V4L2_PIX_FMT_YVU420:
+        supported = 1;
+    }
   }
-  record_value("\n");
+  return supported;
 }
 
 // Probe a V4L2 device to work out what it supports
@@ -80,7 +96,7 @@ static void v4l2_check_device(const char* aVideoDevice) {
 
   fd = open(aVideoDevice, O_RDWR | O_NONBLOCK, 0);
   if (fd < 0) {
-    record_value("ERROR\nV4L2 failed to open device %s: %s\n", aVideoDevice,
+    record_error("V4L2 failed to open device %s: %s", aVideoDevice,
                  strerror(errno));
     return;
   }
@@ -88,21 +104,19 @@ static void v4l2_check_device(const char* aVideoDevice) {
   struct v4l2_capability cap {};
   result = ioctl(fd, VIDIOC_QUERYCAP, &cap);
   if (result < 0) {
-    record_value("ERROR\nV4L2 device %s failed to query capabilities\n",
-                 aVideoDevice);
+    record_error("V4L2 device %s failed to query capabilities", aVideoDevice);
     return;
   }
   log("v4l2test driver %s card %s bus_info %s version %d\n", cap.driver,
       cap.card, cap.bus_info, cap.version);
 
   if (!(cap.capabilities & V4L2_CAP_DEVICE_CAPS)) {
-    record_value("ERROR\nV4L2 device %s does not support DEVICE_CAPS\n",
-                 aVideoDevice);
+    record_error("V4L2 device %s does not support DEVICE_CAPS", aVideoDevice);
     return;
   }
 
   if (!(cap.device_caps & V4L2_CAP_STREAMING)) {
-    record_value("ERROR\nV4L2 device %s does not support V4L2_CAP_STREAMING\n",
+    record_error("V4L2 device %s does not support V4L2_CAP_STREAMING",
                  aVideoDevice);
     return;
   }
@@ -112,27 +126,25 @@ static void v4l2_check_device(const char* aVideoDevice) {
   bool splane = cap.device_caps & V4L2_CAP_VIDEO_M2M;
   bool mplane = cap.device_caps & V4L2_CAP_VIDEO_M2M_MPLANE;
   if (!splane && !mplane) {
-    record_value("ERROR\nV4L2 device %s does not support M2M modes\n",
-                 aVideoDevice);
+    record_error("V4L2 device %s does not support M2M modes", aVideoDevice);
     // (It's probably a webcam!)
     return;
   }
-  record_value("V4L2_SPLANE\n%s\n", splane ? "TRUE" : "FALSE");
-  record_value("V4L2_MPLANE\n%s\n", mplane ? "TRUE" : "FALSE");
-
   // Now check the formats supported for CAPTURE and OUTPUT buffers.
   // For a V4L2-M2M decoder, OUTPUT is actually the bitbuffers we put in and
   // CAPTURE is the framebuffers we get out.
-  v4l2_enumfmt(
+  if (v4l2_supported_fmts(fd, mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE
+                                     : V4L2_BUF_TYPE_VIDEO_CAPTURE) <= 0) {
+    record_error("V4L2 device %s does not support NV12 or YV12 capture formats",
+                 aVideoDevice);
+    return;
+  }
+  int hwcodecs = v4l2_supported_fmts(
       fd,
-      mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE,
-      "CAPTURE");
-  v4l2_enumfmt(
-      fd,
-      mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE : V4L2_BUF_TYPE_VIDEO_OUTPUT,
-      "OUTPUT");
+      mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE : V4L2_BUF_TYPE_VIDEO_OUTPUT);
 
-  record_value("V4L2_SUPPORTED\nTRUE\n");
+  record_value("SUPPORTED\nTRUE\n");
+  record_value("HWCODECS\n%s\n", hwcodecs);
 }
 
 static void PrintUsage() {
