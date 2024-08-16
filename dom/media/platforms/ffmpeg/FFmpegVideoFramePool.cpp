@@ -267,27 +267,17 @@ static Maybe<VADRMPRIMESurfaceDescriptor> FFmpegDescToVA(
     return Nothing();
   }
 
-  if (aAVFrame->crop_top != 0 || aAVFrame->crop_left != 0) {
-    DMABUF_LOG("Top and left-side cropping are not supported");
+  if (aAVFrame->crop_right != 0 || aAVFrame->crop_left != 0) {
+    DMABUF_LOG("Right and left-side cropping are not supported");
     return Nothing();
   }
 
   // Width and height after crop
   vaDesc.width = aAVFrame->width;
-  vaDesc.height = aAVFrame->height - aAVFrame->crop_bottom;
+  vaDesc.height = aAVFrame->height - aAVFrame->crop_top - aAVFrame->crop_bottom;
 
-  // Native width and height before crop is applied
-  unsigned int uncrop_width = aDesc.layers[0].planes[0].pitch;
-  unsigned int uncrop_height = aAVFrame->height;
-
-  unsigned int offset = aDesc.layers[0].planes[0].offset;
-
-  if (aDesc.layers[0].format == DRM_FORMAT_YUV420) {
-    vaDesc.fourcc = VA_FOURCC_YV12;
-
-    // V4L2 expresses YUV420 as a single contiguous buffer containing
-    // all three planes.  DMABufSurfaceYUV expects the three planes
-    // separately, so we have to split them out
+  if (aDesc.layers[0].format == DRM_FORMAT_YUV420 ||
+      aDesc.layers[0].format == DRM_FORMAT_NV12) {
     MOZ_ASSERT(aDesc.nb_objects == 1);
     MOZ_ASSERT(aDesc.nb_layers == 1);
 
@@ -296,42 +286,27 @@ static Maybe<VADRMPRIMESurfaceDescriptor> FFmpegDescToVA(
     vaDesc.objects[0].size = aDesc.objects[0].size;
     vaDesc.objects[0].fd = aDesc.objects[0].fd;
 
-    vaDesc.num_layers = 3;
-    for (int i = 0; i < 3; i++) {
+    vaDesc.num_layers = aDesc.layers[0].nb_planes;
+    for (uint i = 0; i < vaDesc.num_layers; i++) {
       vaDesc.layers[i].drm_format = DRM_FORMAT_R8;
       vaDesc.layers[i].num_planes = 1;
       vaDesc.layers[i].object_index[0] = 0;
+      
+      uint offset = aDesc.layers[0].planes[i].pitch * aAVFrame->crop_top;
+      offset = i ? offset : offset / 2;
+      vaDesc.layers[i].offset[0] = aDesc.layers[0].planes[i].offset + offset;
+      vaDesc.layers[i].pitch[0] = aDesc.layers[0].planes[i].pitch;
     }
-    vaDesc.layers[0].offset[0] = offset;
-    vaDesc.layers[0].pitch[0] = uncrop_width;
-    vaDesc.layers[1].offset[0] = offset + uncrop_width * uncrop_height;
-    vaDesc.layers[1].pitch[0] = uncrop_width / 2;
-    vaDesc.layers[2].offset[0] = offset + uncrop_width * uncrop_height * 5 / 4;
-    vaDesc.layers[2].pitch[0] = uncrop_width / 2;
-  } else if (aDesc.layers[0].format == DRM_FORMAT_NV12) {
-    vaDesc.fourcc = VA_FOURCC_NV12;
 
-    // V4L2 expresses NV12 as a single contiguous buffer containing both
-    // planes.  DMABufSurfaceYUV expects the two planes separately, so we have
-    // to split them out
-    MOZ_ASSERT(aDesc.nb_objects == 1);
-    MOZ_ASSERT(aDesc.nb_layers == 1);
-
-    vaDesc.num_objects = 1;
-    vaDesc.objects[0].drm_format_modifier = aDesc.objects[0].format_modifier;
-    vaDesc.objects[0].size = aDesc.objects[0].size;
-    vaDesc.objects[0].fd = aDesc.objects[0].fd;
-
-    vaDesc.num_layers = 2;
-    for (int i = 0; i < 2; i++) {
-      vaDesc.layers[i].num_planes = 1;
-      vaDesc.layers[i].object_index[0] = 0;
-      vaDesc.layers[i].pitch[0] = uncrop_width;
+    switch (aDesc.layers[0].format) {
+      case DRM_FORMAT_YUV420:
+        vaDesc.fourcc = VA_FOURCC_YV12;
+        break;
+      case DRM_FORMAT_NV12:
+        vaDesc.fourcc = VA_FOURCC_NV12;
+        vaDesc.layers[1].drm_format = DRM_FORMAT_GR88;
     }
-    vaDesc.layers[0].drm_format = DRM_FORMAT_R8;  // Y plane
-    vaDesc.layers[0].offset[0] = offset;
-    vaDesc.layers[1].drm_format = DRM_FORMAT_GR88;  // UV plane
-    vaDesc.layers[1].offset[0] = offset + uncrop_width * uncrop_height;
+
   } else {
     DMABUF_LOG("Don't know how to deal with FOURCC 0x%x",
                aDesc.layers[0].format);
