@@ -1911,6 +1911,9 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
         // Type 'V' for V4L2, used for hw accelerated decode
         static constexpr unsigned long kVideoType =
             static_cast<unsigned long>('V') << _IOC_TYPESHIFT;
+        // Type 'v' for mpp_service, used for hw accelerated decode
+        static constexpr unsigned long kMppType =
+            static_cast<unsigned long>('v') << _IOC_TYPESHIFT;
 #endif
         // nvidia non-tegra uses some ioctls from this range (but not actual
         // fbdev ioctls; nvidia uses values >= 200 for the NR field
@@ -1927,11 +1930,12 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
             static_cast<unsigned long>('H') << _IOC_TYPESHIFT;
 #endif  // defined(__aarch64__)
 
-        // Allow DRI and DMA-Buf for VA-API. Also allow V4L2 if enabled
+        // Allow DRI and DMA-Buf for VA-API. Also allow V4L2/MPP if enabled
         return If(shifted_type == kDrmType, Allow())
             .ElseIf(shifted_type == kDmaBufType, Allow())
 #ifdef MOZ_ENABLE_V4L2
             .ElseIf(shifted_type == kVideoType, Allow())
+            .ElseIf(shifted_type == kMppType, Allow())
 #endif
         // NVIDIA decoder from Linux4Tegra, this is specific to Tegra ARM64 SoC
 #if defined(__aarch64__)

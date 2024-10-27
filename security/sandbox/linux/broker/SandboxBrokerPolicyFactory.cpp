@@ -892,6 +892,11 @@ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
 
   // FFmpeg V4L2 needs to list /dev to find V4L2 devices.
   policy->AddPath(rdonly, "/dev");
+
+  // Add MPP service
+  policy->AddPath(rdwr, "/dev/mpp_service");
+  policy->AddPath(rdonly, "/proc/device-tree/compatible");
+  policy->AddPath(rdonly, "/sys/firmware/devicetree/base/compatible");
 }
 #endif  // MOZ_ENABLE_V4L2
 
