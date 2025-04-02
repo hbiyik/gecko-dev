@@ -609,6 +609,7 @@ void FFmpegVideoDecoder<LIBAV_VER>::InitHWDecoderIfAllowed() {
       {AV_CODEC_ID_VP8, "vp8_rkmpp"},
       {AV_CODEC_ID_VP9, "vp9_rkmpp"},
       {AV_CODEC_ID_AV1, "av1_rkmpp"},
+      {AV_CODEC_ID_HEVC, "hevc_rkmpp"},
   };
 
   // VAAPI didn't work or is disabled, so try V4L2M2M

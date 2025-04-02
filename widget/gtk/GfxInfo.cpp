@@ -699,7 +699,7 @@ void GfxInfo::HwDecTest(const nsAString& aBinary, const char** aArgs) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::AV1HardwareDecode);
       }
-      if (mVAAPISupportedCodecs & CODEC_HW_HEVC) {
+      if (mHwDecSupportedCodecs & CODEC_HW_HEVC) {
         media::MCSInfo::AddSupport(
             media::MediaCodecsSupport::HEVCHardwareDecode);
       }

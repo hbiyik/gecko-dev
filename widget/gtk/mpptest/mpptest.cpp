@@ -54,6 +54,7 @@ using MppCodingType = enum {
   MPP_VIDEO_CodingVP8 = 0x9,
   MPP_VIDEO_CodingVP9 = 0xa,
   MPP_VIDEO_CodingAV1 = 0x01000008,
+  MPP_VIDEO_CodingHEVC = 0x1000004,
 };
 
 using HwAccelCodec = enum {
@@ -61,6 +62,7 @@ using HwAccelCodec = enum {
   CODEC_HW_VP8 = 1 << 5,
   CODEC_HW_VP9 = 1 << 6,
   CODEC_HW_AV1 = 1 << 7,
+  CODEC_HW_HEVC = 1 << 8,
 };
 
 using create_handle = int (*)(MppCtx *ctx, MppApi**);
@@ -93,11 +95,13 @@ int main(int argc, char** argv) {
   HwAccelCodec hwaccels[] = {CODEC_HW_H264,
                              CODEC_HW_VP8,
                              CODEC_HW_VP9,
-                             CODEC_HW_AV1};
+                             CODEC_HW_AV1,
+                             CODEC_HW_HEVC};
   MppCodingType mppcodings[] = {MPP_VIDEO_CodingAVC,
                                 MPP_VIDEO_CodingVP8,
                                 MPP_VIDEO_CodingVP9,
-                                MPP_VIDEO_CodingAV1};
+                                MPP_VIDEO_CodingAV1,
+                                MPP_VIDEO_CodingHEVC};
 
   if (!enable_logging) {
     close_logging();
