@@ -396,8 +396,8 @@ VideoFramePool<LIBAV_VER>::GetVideoFrameSurface(AVDRMFrameDescriptor& aDesc,
   int crop_width = (int)layerDesc->width;
   int crop_height = (int)layerDesc->height;
 
-  // Use the descriptor's address as an id to track ffmpeg surfaces
-  unsigned int ffmpegSurfaceID = (uintptr_t)&aDesc;
+  // Use the descriptor's object0 fd to track ffmpeg surfaces
+  unsigned int ffmpegSurfaceID = (unsigned int)aDesc.objects[0].fd;
 
   MutexAutoLock lock(mSurfaceLock);
 
