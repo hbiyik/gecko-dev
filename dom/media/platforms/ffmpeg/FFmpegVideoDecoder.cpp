@@ -1036,6 +1036,9 @@ bool FFmpegVideoDecoder<LIBAV_VER>::DecodeStats::IsDecodingSlow() const {
 
 void FFmpegVideoDecoder<LIBAV_VER>::DecodeStats::UpdateDecodeTimes(
     const AVFrame* aFrame) {
+  mDuration = -1;
+  return;
+
   if (Duration(aFrame)) {
     // Get the frame duration from decoder (AVFrame Optional)
     mDuration = Duration(aFrame);  
